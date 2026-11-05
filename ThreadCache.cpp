@@ -13,5 +13,9 @@ void* ThreadCache::Allocate(size_t size)
 }
 void* ThreadCache::Deallocate(void* ptr,size_t size)
 {
+    assert(ptr);
+    assert(size <= MAX_BYTES);
 
+    size_t index = SizeClass::Index(size);
+    _freeList[index].Push(ptr);
 }
