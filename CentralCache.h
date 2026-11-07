@@ -3,8 +3,14 @@
 class CentralCache
 {
 public:
-    CentralCache();
-    ~CentralCache();
+    static CentralCache* GetInstance()
+    {
+        return &_sInst;
+    };
+    size_t FetchRangeObj(void*& start,void*& end,size_t batchNum,size_t size);
 private:
-
+    CentralCache(){};
+    CentralCache(const CentralCache&) = delete;
+    SpanList _spanLists[NFREELIST];
+    static CentralCache _sInst;
 };

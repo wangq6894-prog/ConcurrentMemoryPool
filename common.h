@@ -7,7 +7,7 @@ using std::cout;
 using std::endl;
 
 static const size_t MAX_BYTES = 256*1024;
-static const size_t NFREE_LIST = 208;
+static const size_t NFREELIST = 208;
 
 #ifdef _WIN64
     typedef unsigned long long PAGE_ID;
@@ -31,6 +31,11 @@ class FreeList
             NextObj(obj) = _freeList;
             _freeList = obj;
         }
+        void PushRange(void* start,void* end)
+        {
+            NextObj(end) = _freeList;
+            _freeList = start;
+        }
         void* Pop()
         {
             //头删
@@ -42,8 +47,13 @@ class FreeList
         {
             return _freeList == nullptr;
         }
+        size_t& MaxSize()
+        {
+            return _maxSize;
+        }
     private:
         void* _freeList = nullptr;
+        size_t _maxSize = 1;
 };
 
 //计算对象大小的对齐映射规则
@@ -106,7 +116,21 @@ class SizeClass
                 return -1;
             }
         }
-
+    //一次thread cache从中央缓存获取的内存块数量
+    //小对象一次申请的多
+    //大对象一次申请的少
+    static size_t NumMoveSize(size_t size)
+    {
+        assert(size > 0);
+        // [2, 512]，⼀次批量移动多少个对象的(慢启动)上限值 
+        //控制上下限
+        int num = MAX_BYTES / size;
+        if (num < 2)
+            num = 2;
+        if (num > 512)
+            num = 512;
+        return num;
+    }
 };
 //管理多个连续页大块内存的跨度结构
 struct Span
@@ -151,5 +175,6 @@ public:
     ~SpanList();
 private:
     Span* _head;
-    std::mutex _mtx;
+public:
+    std::mutex _mtx;//桶锁
 };

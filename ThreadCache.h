@@ -14,7 +14,7 @@ class ThreadCache
         {
         }
     private:
-        FreeList _freeList[NFREE_LIST];
+        FreeList _freeLists[NFREELIST];
 };
 
 // 线程局部存储(TLS)指针：每个线程各自持有一份 pTLSThreadCache，
