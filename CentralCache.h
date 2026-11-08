@@ -1,5 +1,5 @@
 #pragma once
-#include "common.h"
+#include "Common.h"
 class CentralCache
 {
 public:
@@ -8,6 +8,7 @@ public:
         return &_sInst;
     };
     size_t FetchRangeObj(void*& start,void*& end,size_t batchNum,size_t size);
+    Span* GetOneSpan(SpanList& list,size_t size);
 private:
     CentralCache(){};
     CentralCache(const CentralCache&) = delete;

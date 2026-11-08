@@ -2,20 +2,60 @@
 #include <iostream>
 #include <string>
 #include <time.h>
+#include <mutex>
 #include <assert.h>
+#include <algorithm>
+#include <new>
+
+#ifdef _WIN32
+    #include <windows.h>
+#else
+    #include <sys/mman.h>
+#endif
+
 using std::cout;
 using std::endl;
 
 static const size_t MAX_BYTES = 256*1024;
 static const size_t NFREELIST = 208;
+static const size_t NPAGES = 128;
+static const size_t PAGE_SHIFT = 13;
 
 #ifdef _WIN64
     typedef unsigned long long PAGE_ID;
-#elif _WIN32
-    typedef size_t PAGE_ID;
 #else
-    //
+    typedef size_t PAGE_ID;
 #endif
+
+// 直接向操作系统申请 kpage 页连续内存
+inline void* SystemAlloc(size_t kpage)
+{
+    void* ptr = nullptr;
+#ifdef _WIN32
+    ptr = VirtualAlloc(0, kpage << PAGE_SHIFT, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+#else
+    // mmap 只保证按系统页(4KB)对齐，而页号按 8KB(PAGE_SHIFT=13) 计算，
+    // 因此多申请一页并向上对齐到 8KB，否则 pageId<<PAGE_SHIFT 会偏一页导致越界访问
+    size_t bytes = kpage << PAGE_SHIFT;
+    size_t align = (size_t)1 << PAGE_SHIFT;
+    void* raw = mmap(nullptr, bytes + align, PROT_READ | PROT_WRITE,
+               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (raw == MAP_FAILED)
+    {
+        ptr = nullptr;
+    }
+    else
+    {
+        uintptr_t addr = (uintptr_t)raw;
+        ptr = (void*)((addr + align - 1) & ~(uintptr_t)(align - 1));
+    }
+#endif
+    if (ptr == nullptr)
+    {
+        throw std::bad_alloc();
+    }
+    return ptr;
+}
 
 inline void*& NextObj(void* obj)
 {
@@ -131,12 +171,22 @@ class SizeClass
             num = 512;
         return num;
     }
+     // 单个对象256KB 
+    static size_t NumMovePage(size_t size)
+    {
+        size_t num = NumMoveSize(size);
+        size_t npage = num*size;
+        npage >>= PAGE_SHIFT;
+        if (npage == 0)
+            npage = 1;
+        return npage;
+    }
 };
 //管理多个连续页大块内存的跨度结构
 struct Span
 {
     PAGE_ID _pageId = 0;//大块内存的起始页的页号
-    size_t _size = 0;//页的数量
+    size_t _n = 0;//大块内存的页的数量
     Span* _next = nullptr;//双向链表结构
     Span* _prev = nullptr;
     size_t _useCount = 0;//切好的小块内存，被分配给thread cache的计数
@@ -152,6 +202,28 @@ public:
         _head->_next = _head;
         _head->_prev = _head;
     };
+    Span* Begin()
+    {
+        return _head->_next;
+    }
+    Span* End()
+    {
+        return _head;
+    }
+    bool Empty()
+    {
+        return _head->_next == _head;
+    }
+    void PushFront(Span* span)
+    {
+        Insert(Begin(),span);
+    }
+    Span* PopFront()
+    {
+        Span* front = _head->_next;
+        Erase(front);
+        return front;
+    }
     void Insert(Span* pos,Span* newSpan)
     {
         assert(pos);
@@ -172,7 +244,17 @@ public:
         prev->_next = next;
         next->_prev = prev;
     }
-    ~SpanList();
+    ~SpanList()
+    {
+        Span* cur = _head->_next;
+        while (cur != _head)
+        {
+            Span* next = cur->_next;
+            delete cur;
+            cur = next;
+        }
+        delete _head;
+    }
 private:
     Span* _head;
 public:

@@ -1,11 +1,6 @@
 #pragma once
-#include "common.h"
+#include "Common.h"
 #include "ThreadCache.h"
-
-void* ThreadCache::FetchFreeList(size_t index,size_t size)
-{
-    return nullptr;
-}
 
 static void* ConcurrentAlloc(size_t size)
 {
@@ -18,5 +13,5 @@ static void* ConcurrentAlloc(size_t size)
 static void ConcurrentFree(void* ptr)
 {
     assert(pTLSThreadCache);
-    pThreadCache->Deallocate(ptr);
+    (void)ptr;
 }

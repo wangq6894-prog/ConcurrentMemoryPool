@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common.h"
+#include "Common.h"
 
 class ThreadCache
 {
@@ -10,6 +10,7 @@ class ThreadCache
         }
         void* Allocate(size_t size);
         void Deallocate(void* ptr,size_t size);
+        void* FetchFromCentralCache(size_t index,size_t size);
         ~ThreadCache()
         {
         }
