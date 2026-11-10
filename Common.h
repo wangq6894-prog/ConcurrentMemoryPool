@@ -6,6 +6,9 @@
 #include <assert.h>
 #include <algorithm>
 #include <new>
+#include <cstdint>
+#include <cstdio>
+#include <vector>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -28,32 +31,37 @@ static const size_t PAGE_SHIFT = 13;
 #endif
 
 // 直接向操作系统申请 kpage 页连续内存
+#ifndef NDEBUG
+// 调试用
+inline std::vector<std::pair<uintptr_t, uintptr_t>>& DebugMapRanges()
+{
+    static std::vector<std::pair<uintptr_t, uintptr_t>> ranges;
+    return ranges;
+}
+#endif
+
 inline void* SystemAlloc(size_t kpage)
 {
+    const size_t bytes = kpage << PAGE_SHIFT;
     void* ptr = nullptr;
 #ifdef _WIN32
-    ptr = VirtualAlloc(0, kpage << PAGE_SHIFT, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    ptr = VirtualAlloc(nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 #else
-    // mmap 只保证按系统页(4KB)对齐，而页号按 8KB(PAGE_SHIFT=13) 计算，
-    // 因此多申请一页并向上对齐到 8KB，否则 pageId<<PAGE_SHIFT 会偏一页导致越界访问
-    size_t bytes = kpage << PAGE_SHIFT;
-    size_t align = (size_t)1 << PAGE_SHIFT;
-    void* raw = mmap(nullptr, bytes + align, PROT_READ | PROT_WRITE,
+    ptr = mmap(nullptr, bytes, PROT_READ | PROT_WRITE,
                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (raw == MAP_FAILED)
+    if (ptr == MAP_FAILED)
     {
         ptr = nullptr;
-    }
-    else
-    {
-        uintptr_t addr = (uintptr_t)raw;
-        ptr = (void*)((addr + align - 1) & ~(uintptr_t)(align - 1));
     }
 #endif
     if (ptr == nullptr)
     {
         throw std::bad_alloc();
     }
+#ifndef NDEBUG
+    DebugMapRanges().push_back({reinterpret_cast<uintptr_t>(ptr), reinterpret_cast<uintptr_t>(ptr) + bytes});
+    printf("SystemAlloc: [%p, %p)\n", ptr, static_cast<char*>(ptr) + bytes);
+#endif
     return ptr;
 }
 
