@@ -65,6 +65,14 @@ inline void* SystemAlloc(size_t kpage)
     return ptr;
 }
 
+inline static void SystemFree(void* ptr)
+{
+#ifdef _WIN32
+    VirtualFree(ptr, 0, MEM_RELEASE);
+#else
+    munmap(ptr, 0);
+#endif
+}
 inline void*& NextObj(void* obj)
 {
     return *(void**)obj;
@@ -78,17 +86,33 @@ class FreeList
             //*(void**)obj = _freeList;
             NextObj(obj) = _freeList;
             _freeList = obj;
+            _size++;
         }
-        void PushRange(void* start,void* end)
+        void PushRange(void* start,void* end,size_t n)
         {
             NextObj(end) = _freeList;
             _freeList = start;
+            _size += n;
+        }
+        void PopRange(void* start,void* end,size_t n)
+        {
+            assert(n >= _size);
+            start = _freeList;
+            end = start;
+            for(size_t i = 0;i < n;i++)
+            {
+                end = NextObj(end);
+            }
+            _freeList = NextObj(end);
+            NextObj(end) = nullptr;
+            _size -= n;
         }
         void* Pop()
         {
             //头删
             void* obj = _freeList;
             _freeList = NextObj(obj);
+            _size--;
             return obj;
         }
         bool Empty()
@@ -99,9 +123,14 @@ class FreeList
         {
             return _maxSize;
         }
+        size_t Size()
+        {
+            return _size;
+        }
     private:
         void* _freeList = nullptr;
         size_t _maxSize = 1;
+        size_t _size = 0;
 };
 
 //计算对象大小的对齐映射规则
@@ -132,8 +161,9 @@ class SizeClass
                 return  _RoundUp(size, 8*1024);
             }
             else{
-                assert(false);
-                return -1;
+                // assert(false);
+                // return -1;
+                return _RoundUp(size,1 << PAGE_SHIFT);
             }
         }
         static inline size_t _Index(size_t size, size_t alignNum)
@@ -199,6 +229,8 @@ struct Span
     Span* _prev = nullptr;
     size_t _useCount = 0;//切好的小块内存，被分配给thread cache的计数
     void* _freeList = nullptr;//切好的小块内存的free list
+
+    bool _isUse = false;//是否在被使用
 };
 //带头双向链表
 class SpanList
