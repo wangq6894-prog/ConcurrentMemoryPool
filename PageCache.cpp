@@ -10,17 +10,24 @@ Span* PageCache::NewSpan(size_t k)
     if(k > NPAGES -1)
     {
         void* ptr = SystemAlloc(k);
-        Span* span = new Span;
+        //Span* span = new Span;
+        Span* span = _spanPool.New();
         span->_pageId = (PAGE_ID)ptr >> PAGE_SHIFT;
         span->_n = k;
         _idSpanMap[span->_pageId] = span;
         return span;
     }
 
-    // 先检查第K页是否有span
+    // 先检查第K个桶是否有span
     if(!_spanLists[k].Empty())
     {
-        return _spanLists[k].PopFront();
+        Span* kSpan = _spanLists[k].PopFront();
+        //建立映射
+        for(PAGE_ID i = 0;i < kSpan->_n;i++)
+        {
+            _idSpanMap[kSpan->_pageId+i] = kSpan;
+        }
+        return kSpan;
     }
     //检查一下后面的桶里面有没有span，如果有可以把它进行切分
     for(size_t i = k+1;i < NPAGES;i++)
@@ -28,7 +35,8 @@ Span* PageCache::NewSpan(size_t k)
         if(!_spanLists[i].Empty())
         {
             Span* nSpan = _spanLists[i].PopFront();
-            Span* kSpan = new Span;
+            //Span* kSpan = new Span;
+            Span* kSpan = _spanPool.New();
             // 在nSpan的头部切k页下来
             // k页返回
             // n页继续切分
@@ -55,7 +63,8 @@ Span* PageCache::NewSpan(size_t k)
     
     //走到这个位置就说明后边没有更大页的span了
     //这时候就要去堆要一个128页的span
-    Span* bigSpan = new Span;
+    //Span* bigSpan = new Span;
+    Span* bigSpan = _spanPool.New();
     void* ptr = SystemAlloc(NPAGES - 1);
     bigSpan -> _pageId = (PAGE_ID)ptr >> PAGE_SHIFT;
     bigSpan -> _n = NPAGES - 1;
@@ -65,6 +74,9 @@ Span* PageCache::NewSpan(size_t k)
 Span* PageCache::MapObjToSpan(void* obj)
 {
     PAGE_ID id = (PAGE_ID)obj >> PAGE_SHIFT;
+    
+    std::unique_lock<std::mutex> lock(_pageMtx);
+
     auto ret = _idSpanMap.find(id);
     if(ret != _idSpanMap.end())
     {
@@ -83,7 +95,8 @@ void PageCache::ReleaseSpanToPageCache(Span* span)
     {
         void* ptr = (void*)(span->_pageId << PAGE_SHIFT);
         SystemFree(ptr);
-        delete span;
+        //delete span;
+        _spanPool.Delete(span);
         return;
     }
     // 对span前后的页，尝试进行合并，缓解内存碎片问题
@@ -109,7 +122,8 @@ void PageCache::ReleaseSpanToPageCache(Span* span)
         span->_pageId = prevSpan->_pageId;
         span->_n += prevSpan->_n;
         _spanLists[prevSpan->_n].Erase(prevSpan);
-        delete prevSpan;
+        //delete prevSpan;
+        _spanPool.Delete(prevSpan);
 
         //向后合并
         while(1)
@@ -132,7 +146,8 @@ void PageCache::ReleaseSpanToPageCache(Span* span)
             }
             span->_n += nextSpan->_n;
             _spanLists[nextSpan->_n].Erase(nextSpan);
-            delete nextSpan;
+            //delete nextSpan;
+            _spanPool.Delete(nextSpan);
         }
         _spanLists[span->_n].PushFront(span);
         span->_isUse = false;

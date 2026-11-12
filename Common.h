@@ -227,6 +227,7 @@ struct Span
     size_t _n = 0;//大块内存的页的数量
     Span* _next = nullptr;//双向链表结构
     Span* _prev = nullptr;
+    size_t _objSize = 0;//切好的小对象的大小
     size_t _useCount = 0;//切好的小块内存，被分配给thread cache的计数
     void* _freeList = nullptr;//切好的小块内存的free list
 

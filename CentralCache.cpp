@@ -26,6 +26,8 @@ Span* CentralCache::GetOneSpan(SpanList& list,size_t size)
     Span* span = PageCache::GetInstance()->NewSpan(SizeClass::NumMovePage(size));
     PageCache::GetInstance()->_pageMtx.unlock();
     span->_isUse = true;
+    span->_objSize = size;
+
     //对获取到的span进行切分，不需要加锁，因为其他线程访问不到这个span
 
     // 计算span的大块内存的起始地址和大块内存的大小(字节数)
