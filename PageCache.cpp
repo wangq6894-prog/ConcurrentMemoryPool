@@ -94,22 +94,23 @@ void PageCache::ReleaseSpanToPageCache(Span* span)
     if(span->_n > NPAGES - 1)
     {
         void* ptr = (void*)(span->_pageId << PAGE_SHIFT);
-        SystemFree(ptr);
+        SystemFree(ptr, span->_n);
         //delete span;
         _spanPool.Delete(span);
         return;
     }
     // 对span前后的页，尝试进行合并，缓解内存碎片问题
+    // 向前合并
     while(1){
         PAGE_ID prevId = span -> _pageId - 1;
         auto ret = _idSpanMap.find(prevId);
-        //前面的也好没有，不合并
-        if(ret != _idSpanMap.end())
+        //前面没有相邻的span，不合并
+        if(ret == _idSpanMap.end())
         {
-            Span* prevSpan = ret->second;
+            break;
         }
-        //前面相邻页的span在使用，不合并
         Span* prevSpan = ret -> second;
+        //前面相邻页的span在使用，不合并
         if(prevSpan->_isUse == true)
         {
             break;
@@ -124,34 +125,34 @@ void PageCache::ReleaseSpanToPageCache(Span* span)
         _spanLists[prevSpan->_n].Erase(prevSpan);
         //delete prevSpan;
         _spanPool.Delete(prevSpan);
-
-        //向后合并
-        while(1)
-        {
-            PAGE_ID nextId = span->_pageId + span->_n;
-            auto ret = _idSpanMap.find(nextId);
-            if(ret == _idSpanMap.end())
-            {
-                break;
-            }
-            Span* nextSpan = ret -> second;
-            if(nextSpan->_isUse == true)
-            {
-                break;
-            }
-            //合并span
-            if(nextSpan->_n + span->_n > NPAGES - 1)
-            {
-                break;
-            }
-            span->_n += nextSpan->_n;
-            _spanLists[nextSpan->_n].Erase(nextSpan);
-            //delete nextSpan;
-            _spanPool.Delete(nextSpan);
-        }
-        _spanLists[span->_n].PushFront(span);
-        span->_isUse = false;
-        _idSpanMap[span->_pageId] = span;
-        _idSpanMap[span->_pageId+span->_n-1] = span;
     }
+
+    //向后合并
+    while(1)
+    {
+        PAGE_ID nextId = span->_pageId + span->_n;
+        auto ret = _idSpanMap.find(nextId);
+        if(ret == _idSpanMap.end())
+        {
+            break;
+        }
+        Span* nextSpan = ret -> second;
+        if(nextSpan->_isUse == true)
+        {
+            break;
+        }
+        //合并span
+        if(nextSpan->_n + span->_n > NPAGES - 1)
+        {
+            break;
+        }
+        span->_n += nextSpan->_n;
+        _spanLists[nextSpan->_n].Erase(nextSpan);
+        //delete nextSpan;
+        _spanPool.Delete(nextSpan);
+    }
+    _spanLists[span->_n].PushFront(span);
+    span->_isUse = false;
+    _idSpanMap[span->_pageId] = span;
+    _idSpanMap[span->_pageId+span->_n-1] = span;
 }

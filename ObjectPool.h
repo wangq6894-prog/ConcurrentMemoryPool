@@ -4,34 +4,10 @@
 #include <time.h>
 #include <new>
 #include <stdexcept>
+#include "Common.h"
 using std::cout;
 using std::endl;
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/mman.h>
-#include <unistd.h>
-#endif
-inline static void *SystemAlloc(size_t kpage)
-{
-    void *ptr = nullptr;
-#ifdef _WIN32
-    ptr = VirtualAlloc(0, kpage << 13, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-#else
-    // linux下brk mmap等
-    size_t page_size = sysconf(_SC_PAGESIZE); // 获取系统页大小
-    size_t size = kpage * page_size;
-    ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE,
-               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (ptr == MAP_FAILED)
-        ptr = nullptr;
-#endif
 
-    if (ptr == nullptr)
-        throw std::bad_alloc();
-
-    return ptr;
-}
 // 定长内存池
 template <typename T>
 class ObjectPool
@@ -44,7 +20,7 @@ public:
         if (_freeList != nullptr)
         {
             void *next = *(void **)_freeList;
-            obj = _freeList;
+            obj = (T *)_freeList;
             _freeList = next;
             return obj;
         }
@@ -54,7 +30,7 @@ public:
             {
                 //_memory = (char *)malloc(128 * 1024);
                 _remainBytes = 128 * 1024; // 目标块大小 128KB
-                _memory = (char *)SystemAlloc(_remainBytes / (1 << 12));
+                _memory = (char *)SystemAlloc(_remainBytes / (1 << PAGE_SHIFT));
                 if (_memory == nullptr)
                 {
                     throw std::bad_alloc();
@@ -102,7 +78,7 @@ struct TreeNode
     }
 };
 
-void TestObjectPool()
+inline void TestObjectPool()
 {
     // 申请释放的轮次
     const size_t Rounds = 5;

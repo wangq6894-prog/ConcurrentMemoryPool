@@ -1,5 +1,6 @@
 #pragma once
 
+#include <unordered_map>
 #include "Common.h"
 #include "ObjectPool.h"
 
@@ -26,6 +27,5 @@ private:
     SpanList _spanLists[NPAGES];
     ObjectPool<Span> _spanPool;
     std::unordered_map<PAGE_ID,Span*> _idSpanMap;
-    std::unordered_map<PAGE_ID,size_t> _idSizeMap;
     static PageCache _sInst;
 };

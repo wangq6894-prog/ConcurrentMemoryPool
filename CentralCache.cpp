@@ -24,9 +24,11 @@ Span* CentralCache::GetOneSpan(SpanList& list,size_t size)
     // 没有空闲的span了，只能找page cache要
     PageCache::GetInstance()->_pageMtx.lock();
     Span* span = PageCache::GetInstance()->NewSpan(SizeClass::NumMovePage(size));
-    PageCache::GetInstance()->_pageMtx.unlock();
+    // 必须在持有 page cache 锁时就标记为使用中：
+    // 否则其他线程在合并相邻 span 时可能读到 _isUse == false，把正在使用的 span 合并掉
     span->_isUse = true;
     span->_objSize = size;
+    PageCache::GetInstance()->_pageMtx.unlock();
 
     //对获取到的span进行切分，不需要加锁，因为其他线程访问不到这个span
 
@@ -39,7 +41,8 @@ Span* CentralCache::GetOneSpan(SpanList& list,size_t size)
     span->_freeList = start;
     start += size;
     void* tail = span->_freeList;
-    while(start < end)
+    // 只挂入能完整放下 size 字节的对象，否则最后一个对象会越出 span 边界
+    while(start + size <= end)
     {
         NextObj(tail) = start;
         tail = NextObj(tail);

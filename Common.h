@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include <utility>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -16,13 +17,10 @@
     #include <sys/mman.h>
 #endif
 
-using std::cout;
-using std::endl;
-
 static const size_t MAX_BYTES = 256*1024;
 static const size_t NFREELIST = 208;
 static const size_t NPAGES = 128;
-static const size_t PAGE_SHIFT = 13;
+static const size_t PAGE_SHIFT = 12;//页大小2^12=4KB，与 Linux mmap 的系统页大小对齐
 
 #ifdef _WIN64
     typedef unsigned long long PAGE_ID;
@@ -31,15 +29,6 @@ static const size_t PAGE_SHIFT = 13;
 #endif
 
 // 直接向操作系统申请 kpage 页连续内存
-#ifndef NDEBUG
-// 调试用
-inline std::vector<std::pair<uintptr_t, uintptr_t>>& DebugMapRanges()
-{
-    static std::vector<std::pair<uintptr_t, uintptr_t>> ranges;
-    return ranges;
-}
-#endif
-
 inline void* SystemAlloc(size_t kpage)
 {
     const size_t bytes = kpage << PAGE_SHIFT;
@@ -58,19 +47,15 @@ inline void* SystemAlloc(size_t kpage)
     {
         throw std::bad_alloc();
     }
-#ifndef NDEBUG
-    DebugMapRanges().push_back({reinterpret_cast<uintptr_t>(ptr), reinterpret_cast<uintptr_t>(ptr) + bytes});
-    printf("SystemAlloc: [%p, %p)\n", ptr, static_cast<char*>(ptr) + bytes);
-#endif
     return ptr;
 }
 
-inline static void SystemFree(void* ptr)
+inline static void SystemFree(void* ptr, size_t kpage)
 {
 #ifdef _WIN32
     VirtualFree(ptr, 0, MEM_RELEASE);
 #else
-    munmap(ptr, 0);
+    munmap(ptr, kpage << PAGE_SHIFT);
 #endif
 }
 inline void*& NextObj(void* obj)
@@ -94,12 +79,12 @@ class FreeList
             _freeList = start;
             _size += n;
         }
-        void PopRange(void* start,void* end,size_t n)
+        void PopRange(void*& start,void*& end,size_t n)
         {
-            assert(n >= _size);
+            assert(n <= _size);
             start = _freeList;
             end = start;
-            for(size_t i = 0;i < n;i++)
+            for(size_t i = 0;i < n - 1;i++)
             {
                 end = NextObj(end);
             }
@@ -144,7 +129,6 @@ class SizeClass
         }
         static inline size_t RoundUp(size_t size)
         {
-            assert(size <= MAX_BYTES);
             if (size <= 128){
                 return _RoundUp(size, 8);
             }
@@ -217,6 +201,10 @@ class SizeClass
         npage >>= PAGE_SHIFT;
         if (npage == 0)
             npage = 1;
+        // 不能超过 NPAGES-1：否则会走 PageCache 的大块分支，该分支只映射首页，
+        // 导致 span 内第 2 个及以后对象的页查不到 span
+        if (npage > NPAGES - 1)
+            npage = NPAGES - 1;
         return npage;
     }
 };
@@ -287,15 +275,12 @@ public:
     }
     ~SpanList()
     {
-        Span* cur = _head->_next;
-        while (cur != _head)
-        {
-            Span* next = cur->_next;
-            delete cur;
-            cur = next;
-        }
+        // span 由 PageCache 的 ObjectPool 分配，不能用 delete 释放，这里只释放头结点
         delete _head;
     }
+    // 禁止拷贝：_head 为裸指针且由析构释放，拷贝会导致 double free
+    SpanList(const SpanList&) = delete;
+    SpanList& operator=(const SpanList&) = delete;
 private:
     Span* _head;
 public:
